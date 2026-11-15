@@ -1,0 +1,47 @@
+name: Verify Invisible Ink on the iOS simulator
+
+on:
+  push:
+    branches:
+      - verify/invisible-ink-ios
+
+permissions:
+  contents: read
+
+jobs:
+  simulator:
+    if: github.repository == 'dts333/Signal-iOS'
+    runs-on: xcode-27
+    timeout-minutes: 45
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: b8ec1a9a31593528bd0d911b8c25c2ead005ca7d
+          persist-credentials: false
+      - name: Verify the checkout and Xcode version
+        run: |
+          test "$(git rev-parse HEAD)" = b8ec1a9a31593528bd0d911b8c25c2ead005ca7d
+          Scripts/check_xcode_version.py --relaxed
+          xcodebuild -version
+      - name: Set up iOS and Metal
+        shell: bash
+        run: |
+          xcodebuild -downloadComponent MetalToolchain
+          if ! xcrun simctl list runtimes available | grep -q 'com.apple.CoreSimulator.SimRuntime.iOS-27-1'; then
+            xcodebuild -downloadPlatform iOS -buildVersion 27.1
+          fi
+      - name: Build and test on the simulator
+        shell: bash
+        run: |
+          device=$(xcrun simctl list devices available -j | jq -er '[.devices["com.apple.CoreSimulator.SimRuntime.iOS-27-1"][] | select(.name | startswith("iPhone"))] | first | .udid')
+          xcodebuild test \
+            -workspace Signal.xcworkspace \
+            -scheme Signal \
+            -destination "platform=iOS Simulator,id=$device" \
+            -disableAutomaticPackageResolution \
+            -parallel-testing-enabled NO \
+            -only-testing:SignalServiceKitTests/MessageBodyTests \
+            -resultBundlePath "$RUNNER_TEMP/SignalInvisibleInk.xcresult"
+          xcrun xcresulttool get test-results summary --path "$RUNNER_TEMP/SignalInvisibleInk.xcresult"
